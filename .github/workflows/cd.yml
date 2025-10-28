@@ -7,7 +7,6 @@ on:
 
 env:
   DOTNET_VERSION: '8.0.x'
-  AZURE_WEBAPP_NAME: '${{ vars.AZURE_WEBAPP_NAME }}'
   AZURE_RESOURCE_GROUP: '${{ vars.AZURE_RESOURCE_GROUP }}'
   DOCKER_IMAGE_NAME: '${{ vars.DOCKER_USERNAME }}/fiapcloudgames.userapi'
   DOCKER_USERNAME: ${{ vars.DOCKER_USERNAME }}
@@ -33,7 +32,6 @@ jobs:
     #     echo "JWT Key exists: ${{ secrets.JWT_KEY != '' }}"
     #     echo "Docker Password exists: ${{ secrets.DOCKER_PASSWORD != '' }}"
     #     echo "Azure Credentials exists: ${{ secrets.AZURE_CREDENTIALS != '' }}"
-    #     echo "Azure Publish Profile exists: ${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE != '' }}"
 
     - name: Setup .NET
       uses: actions/setup-dotnet@v4
