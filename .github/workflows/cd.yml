@@ -1,0 +1,93 @@
+name: CD Pipeline
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+env:
+  DOTNET_VERSION: '8.0.x'
+  AZURE_WEBAPP_NAME: '${{ vars.AZURE_WEBAPP_NAME }}'
+  AZURE_RESOURCE_GROUP: '${{ vars.AZURE_RESOURCE_GROUP }}'
+  DOCKER_IMAGE_NAME: '${{ vars.DOCKER_USERNAME }}/fiapcloudgames.userapi'
+  DOCKER_USERNAME: ${{ vars.DOCKER_USERNAME }}
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    # - name: Debug Variables (for troubleshooting)
+    #   run: |
+    #     echo "Azure WebApp Name: ${{ env.AZURE_WEBAPP_NAME }}"
+    #     echo "Azure Resource Group: ${{ env.AZURE_RESOURCE_GROUP }}"
+    #     echo "Docker Username: ${{ env.DOCKER_USERNAME }}"
+    #     echo "Docker Image: ${{ env.DOCKER_IMAGE_NAME }}"
+    #     echo "JWT Issuer: ${{ vars.JWT_ISSUER }}"
+    #     echo "Loki URI: ${{ vars.LOKI_URI }}"
+    #     echo "Secrets are hidden, but checking if they exist:"
+    #     echo "Azure SQL Connection String exists: ${{ secrets.AZURE_SQL_CONNECTION_STRING != '' }}"
+    #     echo "JWT Key exists: ${{ secrets.JWT_KEY != '' }}"
+    #     echo "Docker Password exists: ${{ secrets.DOCKER_PASSWORD != '' }}"
+    #     echo "Azure Credentials exists: ${{ secrets.AZURE_CREDENTIALS != '' }}"
+    #     echo "Azure Publish Profile exists: ${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE != '' }}"
+
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: ${{ env.DOTNET_VERSION }}
+
+    - name: Restore dependencies
+      run: dotnet restore
+
+    - name: Build and publish
+      run: |
+        dotnet build --configuration Release --no-restore
+        dotnet publish -c Release -o ./publish --no-build
+
+    - name: Login to Docker Hub
+      uses: docker/login-action@v3
+      with:
+        username: ${{ env.DOCKER_USERNAME }}
+        password: ${{ secrets.DOCKER_PASSWORD }}
+
+    - name: Build Docker image
+      run: |
+        docker build -t ${{ env.DOCKER_IMAGE_NAME }}:latest .
+        docker tag ${{ env.DOCKER_IMAGE_NAME }}:latest ${{ env.DOCKER_IMAGE_NAME }}:${{ github.sha }}
+
+    - name: Push Docker image
+      run: |
+        docker push ${{ env.DOCKER_IMAGE_NAME }}:latest
+        docker push ${{ env.DOCKER_IMAGE_NAME }}:${{ github.sha }}
+
+    - name: Login to Azure
+      uses: azure/login@v1
+      with:
+        creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+    - name: Deploy or Update App
+      run: |
+        if az containerapp show --name cloud-games-user-api --resource-group "${{ env.AZURE_RESOURCE_GROUP }}" &> /dev/null; then
+          az containerapp update \
+            --name cloud-games-user-api \
+            --resource-group "${{ env.AZURE_RESOURCE_GROUP }}" \
+            --image docker.io/${{ env.DOCKER_IMAGE_NAME }}:${{ github.sha }} \
+            --environment managedEnvironment-Fase-3 \
+            --ingress external \
+            --target-port 8080 \
+            --env-vars ASPNETCORE_ENVIRONMENT=Development ConnectionStrings__DefaultConnection="${{ secrets.AZURE_SQL_CONNECTION_STRING }}" JWT__Issuer="${{ vars.JWT_ISSUER }}" JWT__Key="${{ secrets.JWT_KEY }}" Serilog__WriteTo__0__Args__uri="${{ vars.LOKI_URI }}"
+        else
+          az containerapp create \
+            --name cloud-games-user-api \
+            --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
+            --environment managedEnvironment-Fase-3 \
+            --image docker.io/${{ env.DOCKER_IMAGE_NAME }}:${{ github.sha }} \
+            --ingress external \
+            --target-port 8080 \
+            --env-vars ASPNETCORE_ENVIRONMENT=Development ConnectionStrings__DefaultConnection="${{ secrets.AZURE_SQL_CONNECTION_STRING }}" JWT__Issuer="${{ vars.JWT_ISSUER }}" JWT__Key="${{ secrets.JWT_KEY }}" Serilog__WriteTo__0__Args__uri="${{ vars.LOKI_URI }}" 
+        fi
+      shell: bash
